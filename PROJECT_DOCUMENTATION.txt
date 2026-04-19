@@ -1,0 +1,290 @@
+PROJECT DOCUMENTATION - RAG Microservices Platform
+Generated: 2026-03-16 
+
+1) Executive Summary
+This project is a Retrieval Augmented Generation (RAG) platform split into independent services with a Django orchestrator.
+The orchestrator is the only component allowed to talk to the microservices. Frontends (Streamlit and React) only call the Django API.
+The system supports two roles:
+- Admin: upload documents, list documents, delete documents, chat, manage users.
+- Employee: list documents, chat.
+
+2) High-Level Architecture
+Components:
+- Django Orchestrator (orchestrator_backend): auth, role enforcement, orchestration, persistence, API gateway.
+- Ingestion Service (services/ingestion_service): file upload, OCR, PDF parsing, chunking.
+- Indexing Service (services/indexing_service): vector indexing, hybrid retrieval, reranking.
+- LLM Service (services/llm_service): query to answer, calls indexing and LLM.
+- Streamlit UI (services/frontend_service): legacy UI for chat and admin operations.
+- React UI (frontend_react): modern UI with admin and employee flows.
+
+Data stores:
+- Supabase Storage: document file blobs.
+- Supabase Postgres: document metadata and user conversations.
+- Django database (Postgres via DATABASE_URL or SQLite fallback): users, roles, tokens, sessions.
+- Pinecone: vector index for embeddings.
+
+3) Folder Structure (top-level)
+- frontend_react
+- orchestrator_backend
+- services
+- README.md
+
+Key service folders:
+- services/ingestion_service/app
+- services/indexing_service/app
+- services/llm_service/app
+- services/frontend_service/app
+- services/shared
+
+4) Core Data Flow
+Ingestion flow:
+1. Admin uploads file in UI.
+2. Django calls ingestion_service /documents/upload to store file in Supabase Storage.
+3. Django calls ingestion_service /ingest to extract text and create chunks.
+4. Django calls indexing_service /index/upsert to store embeddings in Pinecone.
+5. Django writes document metadata in Supabase Postgres table document_records.
+
+Chat flow:
+1. UI sends user question to Django /api/chat.
+2. Django calls llm_service /ask.
+3. LLM service calls indexing_service /search.
+4. Indexing performs hybrid retrieval + reranking.
+5. LLM service builds context and calls Hugging Face model.
+6. Response + sources returned to UI.
+
+Conversation persistence:
+- Django stores per-user messages in Supabase Postgres table conversation_sessions.
+- When a user is deleted, the conversation row is hard-deleted via a Django signal.
+
+5) Django Orchestrator Details
+Location: orchestrator_backend
+Entry point: manage.py
+Settings: orchestrator_backend/orchestrator_backend/settings.py
+
+Authentication and roles:
+- TokenAuth via DRF.
+- Role enforcement via group membership (Admin, Employee).
+- Users are stored in Django auth_user table in the Django database.
+
+Endpoints (prefix /api):
+- POST /auth/login/admin
+- POST /auth/login/employee
+- GET /auth/me
+- GET /users (admin only)
+- POST /users (admin only)
+- PUT/PATCH/DELETE /users/<id> (admin only)
+- GET/PUT/DELETE /conversations/current
+- POST /chat
+- GET /documents
+- GET /documents/signed-url
+- POST /documents/upload (admin only)
+- DELETE /documents/<filename> (admin only)
+
+Key modules:
+- gateway/views.py: orchestration logic and API handlers.
+- gateway/serializers.py: request and response validation.
+- gateway/permissions.py: admin and employee access checks.
+- gateway/repositories.py: Supabase document metadata + signed URL logic.
+- gateway/signals.py: deletes Supabase conversation row on user deletion.
+
+5A) Backend Classes, CRUD, and Auth (Django)
+Core classes (models and frameworks):
+- User (django.contrib.auth.models.User): built-in user table storing username/password.
+- Group (django.contrib.auth.models.Group): role mapping (Admin, Employee).
+- Token (rest_framework.authtoken.models.Token): per-user API token for auth.
+- DocumentMetadata (gateway/models.py): logical schema for Supabase table document_records
+  This model is managed = False and used only for structure, not migrations.
+
+CRUD responsibilities:
+- Users:
+  - Create: POST /api/users (admin only)
+  - Read: GET /api/users (admin only)
+  - Update: PATCH /api/users/<id> (admin only)
+  - Delete: DELETE /api/users/<id> (admin only)
+  - On delete, a signal removes the user’s conversation row in Supabase.
+- Documents:
+  - Read: GET /api/documents (all roles)
+  - Upload: POST /api/documents/upload (admin only)
+  - Delete: DELETE /api/documents/<filename> (admin only)
+  - Metadata is stored in Supabase table document_records via DocumentRepository.
+- Conversations:
+  - Read: GET /api/conversations/current
+  - Update: PUT /api/conversations/current
+  - Delete: DELETE /api/conversations/current
+
+Authentication flow:
+1. User submits credentials to /api/auth/login/admin or /api/auth/login/employee.
+2. LoginSerializer validates username/password and role group.
+3. Django creates/returns Token, which the frontend stores.
+4. Subsequent requests include Authorization: Token <token>.
+5. Permissions are enforced by IsAdminRole / IsAdminOrEmployeeRole.
+
+How Django calls the services:
+- Upload:
+  1) Django calls ingestion_service /documents/upload (Supabase Storage).
+  2) Django calls ingestion_service /ingest to extract chunks.
+  3) Django calls indexing_service /index/upsert to index vectors.
+  4) Django writes document metadata to Supabase (document_records).
+- Delete:
+  1) Django calls ingestion_service /documents/<filename>.
+  2) Django calls indexing_service /index/delete.
+  3) Django deletes metadata row from Supabase.
+- Chat:
+  1) Django calls llm_service /ask.
+  2) LLM service calls indexing_service /search.
+  3) Django returns answer and sources to frontend.
+
+6) Ingestion Service
+Location: services/ingestion_service/app/main.py
+Framework: FastAPI
+Responsibilities:
+- Upload file to Supabase Storage.
+- Extract text from PDF and images.
+- OCR using easyocr for images.
+- Chunking via hybrid strategy (paragraph + token-based).
+
+Endpoints:
+- GET /health
+- GET /documents/list
+- GET /documents/signed-url
+- POST /documents/upload
+- DELETE /documents/{filename}
+- POST /ingest
+
+7) Indexing Service
+Location: services/indexing_service/app/main.py
+Framework: FastAPI
+Responsibilities:
+- Maintain Pinecone vector index.
+- Maintain in-memory corpus for BM25.
+- Hybrid retrieval (vector + BM25).
+- Reranking using Flashrank.
+
+Raw Document
+     ↓
+[Paragraph Split]
+     ↓
+Sections (coherent ideas)
+     ↓
+[Token Split]
+     ↓
+512-token chunks with overlap
+     ↓
+[Source Injection]
+     ↓
+"SOURCE + CONTENT"
+     ↓
+[Metadata Added]
+     ↓
+Final Chunks → Embedding → Vector DB
+
+Endpoints:
+- GET /health
+- POST /index/upsert
+- POST /index/delete
+- POST /search
+
+8) LLM Service
+Location: services/llm_service/app/main.py
+Framework: FastAPI
+Responsibilities:
+- Call indexing service to retrieve context.
+- Build prompt (French-only response enforced).
+- Call Hugging Face chat model to generate answer.
+
+Endpoints:
+- GET /health
+- POST /ask
+
+9) Streamlit Frontend
+Location: services/frontend_service/app/main.py
+Responsibilities:
+- Admin and employee login tabs.
+- Chat UI with streaming response effect.
+- Admin document upload in sidebar.
+- Employee read-only access to docs and chat.
+
+10) React Frontend
+Location: frontend_react/src
+Routes:
+- /login/employee
+- /login/admin
+- /chat
+- /documents
+- /users (admin only)
+
+The React app calls only Django /api endpoints and uses token auth.
+
+11) Configuration and Environment Variables
+Django .env (orchestrator_backend/.env):
+- DJANGO_SECRET_KEY
+- DJANGO_DEBUG
+- DJANGO_ALLOWED_HOSTS
+- DJANGO_CORS_ALLOWED_ORIGINS
+- DATABASE_URL (leave empty for SQLite, set for Supabase Postgres)
+- INGESTION_SERVICE_URL
+- INDEXING_SERVICE_URL
+- LLM_SERVICE_URL
+- SUPABASE_URL
+- SUPABASE_SERVICE_KEY
+- SUPABASE_CONVERSATIONS_TABLE
+- SUPABASE_DOCUMENTS_TABLE
+- SUPABASE_BUCKET
+
+Services shared config (services/shared/config.py):
+- Pinecone keys and index settings
+- Hugging Face token and model names
+- Supabase storage URL + key + bucket
+- Service URLs
+
+12) Supabase Tables
+Conversation table (default: conversation_sessions):
+- user_id (text, primary key)
+- messages (jsonb)
+- updated_at (timestamptz)
+
+Document metadata table (default: document_records):
+- name (text, primary key)
+- uploaded_by (text)
+- upload_date (timestamptz)
+
+13) Running the System (local)
+1. Start microservices (from microservices/services):
+- uvicorn ingestion_service.app.main:app --reload --port 8001
+- uvicorn indexing_service.app.main:app --reload --port 8002
+- uvicorn llm_service.app.main:app --reload --port 8003
+
+2. Start Django (from microservices/orchestrator_backend):
+- pip install -r requirements.txt
+- python manage.py migrate
+- python manage.py bootstrap_roles
+- python manage.py runserver 0.0.0.0:9000
+
+3. Start Streamlit (from microservices/services):
+- set DJANGO_BACKEND_URL=http://localhost:9000
+- streamlit run frontend_service/app/main.py --server.port 8501
+
+4. Start React (optional) (from microservices/frontend_react):
+- npm install
+- npm run dev
+
+14) Security and Operations Notes
+- Tokens and API keys in services/shared/config.py should be moved to environment variables for production.
+- Supabase Service Role key has full access and must be protected.
+- CORS is restricted to localhost by default; adjust for deployment.
+- Django TokenAuth is used; rotate tokens if compromised.
+
+15) Troubleshooting
+- Login fails: verify Django running on port 9000 and user exists.
+- Failed to fetch in React: check CORS and backend URL.
+- Supabase errors: check SUPABASE_URL and SUPABASE_SERVICE_KEY.
+- Empty chat responses: check LLM service logs and HF token.
+- Indexing errors: check Pinecone API key, index name, and region.
+
+16) Recent Enhancements
+- Conversation persistence in Supabase via /api/conversations/current.
+- Document metadata stored in Supabase table document_records.
+- User deletion triggers conversation row deletion (gateway/signals.py).
+- Unified DATABASE_URL configuration for Django DB.
+
+End of document.

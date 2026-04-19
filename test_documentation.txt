@@ -1,0 +1,72 @@
+TEST DOCUMENTATION - Django Backend (Initial Suite)
+Generated: 2026-03-30
+
+1) Test Scope (Phase 1)
+- Focus: Django orchestrator only (serializers, permissions, auth endpoints, users CRUD, conversations, chat).
+
+1B) Integration Test Scope (Django)
+- Location: orchestrator_backend/tests/integration
+- Focus: API endpoints and auth flows with mocked external services.
+- Purpose: CI-friendly sanity checks that validate auth logic and role enforcement.
+
+2) Test Structure
+Location:
+- orchestrator_backend/gateway/tests/
+
+Files:
+- test_serializers.py
+  - Validates LoginSerializer errors for invalid credentials and role mismatch.
+- test_permissions.py
+  - Validates IsAdminRole and IsAdminOrEmployeeRole behavior.
+- test_auth.py
+  - Integration-style tests for /api/auth/login/admin and /api/auth/login/employee.
+- test_users_api.py
+  - Admin-only users CRUD flow (/api/users).
+- test_conversations_api.py
+  - GET/PUT/DELETE /api/conversations/current with mocked Supabase client.
+- test_chat_api.py
+  - POST /api/chat with mocked LLM service response.
+- test_documents_api.py
+  - /api/documents list, signed URL, upload, delete with mocked services/repo.
+- test_repositories.py
+  - DocumentRepository unit tests (list, upsert, delete, signed URL).
+- test_signals.py
+  - User deletion signal removes conversation row (mocked Supabase).
+- tests/integration/test_auth_endpoints.py
+  - /api/auth/* login flows
+- tests/integration/test_users_endpoints.py
+  - /api/users admin-only CRUD
+- tests/integration/test_conversations_endpoints.py
+  - /api/conversations/current with mocked Supabase
+- tests/integration/test_chat_endpoint.py
+  - /api/chat streaming response (mocked LLM)
+- tests/integration/test_documents_endpoints.py
+  - /api/documents list + upload (mocked repo + services)
+
+3) Framework and Tools
+- pytest
+- pytest-django
+- pytest-mock
+
+Config:
+- orchestrator_backend/pytest.ini
+  - DJANGO_SETTINGS_MODULE=orchestrator_backend.settings
+  - python_files=test_*.py
+
+4) Running Tests (CI/CD Friendly)
+From orchestrator_backend:
+- pip install -r requirements.txt
+- pip install -r requirements-dev.txt
+- pytest
+
+5) Why this is CI/CD ready
+- Tests use Django test database (no external dependencies).
+- Supabase and microservices are not required for these tests.
+- Deterministic outcomes suitable for pipelines.
+
+6) Next Test Phases (Recommended)
+- Django integration tests for /api/users, /api/documents, /api/chat.
+- Service-level tests for ingestion/indexing/llm with mocks.
+- React unit tests (vitest) and E2E (Playwright).
+
+End of document.

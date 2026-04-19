@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+!.env.sample
+*.local
+db.sqlite3
+*.sqlite3
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*credentials*.json
+secrets.yml
+secrets.yaml

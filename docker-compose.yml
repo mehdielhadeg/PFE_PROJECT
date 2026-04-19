@@ -1,0 +1,81 @@
+version: "3.9"
+
+services:
+  ingestion_service:
+    build:
+      context: ./services
+    command: uvicorn ingestion_service.app.main:app --host 0.0.0.0 --port 8001
+    env_file:
+      - ./services/.env
+    environment:
+      - INGESTION_SERVICE_URL=http://ingestion_service:8001
+      - INDEXING_SERVICE_URL=http://indexing_service:8002
+      - LLM_SERVICE_URL=http://llm_service:8003
+    ports:
+      - "8001:8001"
+
+  indexing_service:
+    build:
+      context: ./services
+    command: uvicorn indexing_service.app.main:app --host 0.0.0.0 --port 8002
+    env_file:
+      - ./services/.env
+    environment:
+      - INGESTION_SERVICE_URL=http://ingestion_service:8001
+      - INDEXING_SERVICE_URL=http://indexing_service:8002
+      - LLM_SERVICE_URL=http://llm_service:8003
+    ports:
+      - "8002:8002"
+
+  llm_service:
+    build:
+      context: ./services
+    command: uvicorn llm_service.app.main:app --host 0.0.0.0 --port 8003
+    env_file:
+      - ./services/.env
+    environment:
+      - INGESTION_SERVICE_URL=http://ingestion_service:8001
+      - INDEXING_SERVICE_URL=http://indexing_service:8002
+      - LLM_SERVICE_URL=http://llm_service:8003
+    ports:
+      - "8003:8003"
+
+  django_backend:
+    build:
+      context: ./orchestrator_backend
+    command: sh -c "python manage.py migrate && python manage.py runserver 0.0.0.0:9000"
+    env_file:
+      - ./orchestrator_backend/.env
+    environment:
+      - INGESTION_SERVICE_URL=http://ingestion_service:8001
+      - INDEXING_SERVICE_URL=http://indexing_service:8002
+      - LLM_SERVICE_URL=http://llm_service:8003
+    ports:
+      - "9000:9000"
+    depends_on:
+      - ingestion_service
+      - indexing_service
+      - llm_service
+
+  streamlit_frontend:
+    build:
+      context: ./services
+    command: streamlit run frontend_service/app/main.py --server.port 8501 --server.address 0.0.0.0
+    env_file:
+      - ./services/.env
+    environment:
+      - DJANGO_BACKEND_URL=http://django_backend:9000
+    ports:
+      - "8501:8501"
+    depends_on:
+      - django_backend
+
+  react_frontend:
+    build:
+      context: ./frontend_react
+      args:
+        VITE_DJANGO_API_BASE: http://localhost:9000/api
+    ports:
+      - "5173:5173"
+    depends_on:
+      - django_backend

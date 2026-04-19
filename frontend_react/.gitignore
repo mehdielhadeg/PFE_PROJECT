@@ -1,0 +1,16 @@
+node_modules
+dist
+.env
+.env.*
+!.env.example
+!.env.sample
+*.local
+.npmrc
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*credentials*.json
+secrets.yml
+secrets.yaml
