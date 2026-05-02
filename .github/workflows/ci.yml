@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  django-tests:
+    name: Django Tests
+    runs-on: ubuntu-latest
+
+    env:
+      DJANGO_SETTINGS_MODULE: orchestrator_backend.settings_test
+      PYTHONPATH: orchestrator_backend
+      DJANGO_SECRET_KEY: ci-secret-key
+      PINECONE_API_KEY: ci-dummy
+      HF_TOKEN: ci-dummy
+      SUPABASE_URL: https://ci.example.com
+      SUPABASE_KEY: ci-dummy
+      SUPABASE_SERVICE_KEY: ci-dummy
+      SUPABASE_CONVERSATIONS_TABLE: conversation_sessions
+      SUPABASE_DOCUMENTS_TABLE: document_records
+      SUPABASE_BUCKET: rag-docs
+      INGESTION_SERVICE_URL: http://localhost:8001
+      INDEXING_SERVICE_URL: http://localhost:8002
+      LLM_SERVICE_URL: http://localhost:8003
+      RABBITMQ_URL: amqp://guest:guest@localhost:5672/
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: |
+            orchestrator_backend/requirements.txt
+            orchestrator_backend/requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r orchestrator_backend/requirements.txt
+          pip install -r orchestrator_backend/requirements-dev.txt
+
+      - name: Run Django unit and integration tests with coverage
+        run: |
+          python -m pytest orchestrator_backend/gateway/tests orchestrator_backend/tests \
+            --cov=orchestrator_backend/gateway \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml \
+            --cov-report=html:htmlcov \
+            -v
+
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: django-coverage
+          path: |
+            coverage.xml
+            htmlcov/

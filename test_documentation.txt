@@ -1,91 +1,117 @@
-TEST DOCUMENTATION - Django Backend (Initial Suite)
-Generated: 2026-03-30
+TEST DOCUMENTATION - Django Backend and CI
+Generated: 2026-05-02
 
-1) Test Scope (Phase 1)
-- Focus: Django orchestrator only (serializers, permissions, auth endpoints, users CRUD, conversations, chat).
-
-1B) Integration Test Scope (Django)
-- Location: orchestrator_backend/tests/integration
-- Focus: API endpoints and auth flows with mocked external services.
-- Purpose: CI-friendly sanity checks that validate auth logic and role enforcement.
+1) Test Scope
+- Focus today: Django orchestrator tests.
+- Covered areas:
+  - serializers
+  - permissions
+  - authentication endpoints
+  - users CRUD
+  - documents endpoints
+  - conversations endpoints
+  - chat endpoint
+  - repository helpers
+  - user deletion signals
 
 2) Test Structure
-Location:
-- orchestrator_backend/gateway/tests/
+Primary unit and API-focused tests:
+- orchestrator_backend/gateway/tests/test_serializers.py
+- orchestrator_backend/gateway/tests/test_permissions.py
+- orchestrator_backend/gateway/tests/test_auth.py
+- orchestrator_backend/gateway/tests/test_users_api.py
+- orchestrator_backend/gateway/tests/test_conversations_api.py
+- orchestrator_backend/gateway/tests/test_chat_api.py
+- orchestrator_backend/gateway/tests/test_documents_api.py
+- orchestrator_backend/gateway/tests/test_repositories.py
+- orchestrator_backend/gateway/tests/test_signals.py
 
-Files:
-- test_serializers.py
-  - Validates LoginSerializer errors for invalid credentials and role mismatch.
-- test_permissions.py
-  - Validates IsAdminRole and IsAdminOrEmployeeRole behavior.
-- test_auth.py
-  - Integration-style tests for /api/auth/login/admin and /api/auth/login/employee.
-- test_users_api.py
-  - Admin-only users CRUD flow (/api/users).
-- test_conversations_api.py
-  - GET/PUT/DELETE /api/conversations/current with mocked Supabase client.
-- test_chat_api.py
-  - POST /api/chat with mocked LLM service response.
-- test_documents_api.py
-  - /api/documents list, signed URL, upload, delete with mocked services/repo.
-- test_repositories.py
-  - DocumentRepository unit tests (list, upsert, delete, signed URL).
-- test_signals.py
-  - User deletion signal removes conversation row (mocked Supabase).
-- tests/integration/test_auth_endpoints.py
-  - /api/auth/* login flows
-- tests/integration/test_users_endpoints.py
-  - /api/users admin-only CRUD
-- tests/integration/test_conversations_endpoints.py
-  - /api/conversations/current with mocked Supabase
-- tests/integration/test_chat_endpoint.py
-  - /api/chat streaming response (mocked LLM)
-- tests/integration/test_documents_endpoints.py
-  - /api/documents list + upload (mocked repo + services)
+Integration-style Django tests:
+- orchestrator_backend/tests/integration/test_auth_endpoints.py
+- orchestrator_backend/tests/integration/test_users_endpoints.py
+- orchestrator_backend/tests/integration/test_conversations_endpoints.py
+- orchestrator_backend/tests/integration/test_chat_endpoint.py
+- orchestrator_backend/tests/integration/test_documents_endpoints.py
 
-3) Framework and Tools
-- pytest
-- pytest-django
-- pytest-mock
+3) Test Settings
+- pytest uses: `orchestrator_backend.settings_test`
+- The dedicated test settings force SQLite so tests never connect to the real Supabase/Postgres database.
+- This makes local runs and CI runs deterministic.
 
-Config:
-- orchestrator_backend/pytest.ini
-  - DJANGO_SETTINGS_MODULE=orchestrator_backend.settings
-  - python_files=test_*.py
+4) RabbitMQ Upload Flow Impact
+- `documents_upload` is now asynchronous.
+- Expected upload response: HTTP 202 with `status=Processing`.
+- Django tests validate queue publishing by mocking `_enqueue`.
+- Django upload tests no longer expect synchronous `/ingest` and `/index/upsert` calls.
 
-4) Running Tests (CI/CD Friendly)
-From orchestrator_backend:
-- pip install -r requirements.txt
-- pip install -r requirements-dev.txt
-- pytest
+Files updated for this flow:
+- orchestrator_backend/gateway/tests/test_documents_api.py
+- orchestrator_backend/tests/integration/test_documents_endpoints.py
 
-4B) RabbitMQ Upload Flow Impact
-- `documents_upload` is now asynchronous:
-  - Expected response: HTTP 202 with `status=Processing`
-  - Queue publish is validated by mocking `_enqueue`
-  - Sync `/ingest` and `/index/upsert` assertions were removed from Django upload endpoint tests
-
-Updated test files:
-- `orchestrator_backend/gateway/tests/test_documents_api.py`
-- `orchestrator_backend/tests/integration/test_documents_endpoints.py`
-
-5) Recommended Commands
+5) Local Installation for Django Tests
 From project root (`microservices`):
-- Run all Django unit + integration tests:
-  - `python -m pytest orchestrator_backend/gateway/tests orchestrator_backend/tests -v`
-- Run only document upload tests (after RabbitMQ refactor):
-  - `python -m pytest orchestrator_backend/gateway/tests/test_documents_api.py orchestrator_backend/tests/integration/test_documents_endpoints.py -v`
-- Run full repo tests (Django + services + other testpaths from `pytest.ini`):
-  - `python -m pytest`
+- `pip install -r orchestrator_backend/requirements.txt`
+- `pip install -r orchestrator_backend/requirements-dev.txt`
 
-6) Why this is CI/CD ready
-- Tests use Django test database (no external dependencies).
-- Supabase and microservices are not required for these tests.
-- Deterministic outcomes suitable for pipelines.
+6) Local Commands
+Run all Django tests:
+- `python -m pytest orchestrator_backend/gateway/tests orchestrator_backend/tests -v`
 
-7) Next Test Phases (Recommended)
-- Django integration tests for /api/users, /api/documents, /api/chat.
-- Service-level tests for ingestion/indexing/llm with mocks.
-- React unit tests (vitest) and E2E (Playwright).
+Run Django tests with coverage:
+- `python -m pytest orchestrator_backend/gateway/tests orchestrator_backend/tests --cov=orchestrator_backend/gateway --cov-report=term-missing --cov-report=html --cov-report=xml -v`
+
+Run only the upload-related tests after RabbitMQ refactor:
+- `python -m pytest orchestrator_backend/gateway/tests/test_documents_api.py orchestrator_backend/tests/integration/test_documents_endpoints.py -v`
+
+7) GitHub Actions CI
+Workflow file:
+- `.github/workflows/ci.yml`
+
+Pipeline behavior:
+- Triggered on every push
+- Triggered on every pull request
+- Can also be launched manually from GitHub with `workflow_dispatch`
+- Installs Python 3.12
+- Installs Django dependencies and test dependencies
+- Runs Django unit and integration tests with pytest
+- Generates coverage in terminal output, `coverage.xml`, and `htmlcov/`
+- Uploads the coverage files as GitHub Actions artifacts
+
+8) Environment Variables in CI
+For this Django test pipeline, no real production secrets are required.
+The workflow injects safe dummy values for variables such as:
+- `SUPABASE_URL`
+- `SUPABASE_KEY`
+- `SUPABASE_SERVICE_KEY`
+- `PINECONE_API_KEY`
+- `HF_TOKEN`
+- `RABBITMQ_URL`
+
+Why this is safe:
+- These tests mock external systems.
+- The Django test settings use SQLite, not your production database.
+- No live calls to Supabase, Pinecone, or RabbitMQ are required for this workflow.
+
+9) What You Must Do in GitHub
+1. Push your code to GitHub.
+2. Open the repository on GitHub.
+3. Go to the `Actions` tab.
+4. GitHub will automatically detect `.github/workflows/ci.yml`.
+5. On the next push or pull request, the workflow will run automatically.
+6. Click the workflow run to see:
+   - install logs
+   - pytest results
+   - pass/fail status
+   - uploaded coverage artifacts
+
+10) What You Do Not Need Yet
+- No GitHub Secrets are required for this first Django CI pipeline.
+- No database service container is required.
+- No RabbitMQ container is required for the Django tests currently covered.
+
+11) Recommended Next Steps
+- Add a second CI job later for `services/tests` once you want the FastAPI services in the pipeline.
+- Add React Vitest job once frontend unit tests are in place.
+- Add branch protection so merges require the CI check to pass.
 
 End of document.
