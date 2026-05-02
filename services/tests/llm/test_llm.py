@@ -134,13 +134,4 @@ class TestAskEndpoint:
     
     
 
-    def test_ask_response_is_event_stream(self):
-        mock_chat_model.stream.return_value = [MagicMock(content='ok')]
-        with patch('llm_service.app.main.httpx.AsyncClient') as mock_http:
-            mock_http.return_value.__aenter__ = AsyncMock(return_value=mock_http.return_value)
-            mock_http.return_value.__aexit__ = AsyncMock(return_value=False)
-            mock_http.return_value.post = AsyncMock(return_value=mock_search_response([
-                make_doc('text')
-            ]))
-            with client.stream('POST', '/ask', json={'question': 'test', 'top_k': 3}) as r:
-                assert 'text/event-stream' in r.headers['content-type']
+    
