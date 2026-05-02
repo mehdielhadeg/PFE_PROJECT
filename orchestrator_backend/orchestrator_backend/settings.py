@@ -118,6 +118,8 @@ CORS_ALLOWED_ORIGINS = [
 MICRO_INGESTION_URL = os.getenv('INGESTION_SERVICE_URL', 'http://localhost:8001').rstrip('/')
 MICRO_INDEXING_URL = os.getenv('INDEXING_SERVICE_URL', 'http://localhost:8002').rstrip('/')
 MICRO_LLM_URL = os.getenv('LLM_SERVICE_URL', 'http://localhost:8003').rstrip('/')
+RABBITMQ_URL = 'amqp://guest:guest@rabbitmq:5672/'
+#RABBITMQ_URL = 'amqp://guest:guest@localhost:5672/'
 
 SUPABASE_URL = os.getenv('SUPABASE_URL', '').strip()
 SUPABASE_SERVICE_KEY = os.getenv('SUPABASE_SERVICE_KEY', '').strip()

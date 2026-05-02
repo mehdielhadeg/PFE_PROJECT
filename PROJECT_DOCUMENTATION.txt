@@ -1,5 +1,4 @@
 PROJECT DOCUMENTATION - RAG Microservices Platform
-Generated: 2026-03-16 
 
 1) Executive Summary
 This project is a Retrieval Augmented Generation (RAG) platform split into independent services with a Django orchestrator.

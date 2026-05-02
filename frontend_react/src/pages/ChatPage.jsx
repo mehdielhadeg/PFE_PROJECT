@@ -6,26 +6,86 @@ import {
   Alert,
   Box,
   Button,
-  Stack,
   TextField,
   Typography,
 } from '@mui/material'
 import DeleteOutlineRoundedIcon from '@mui/icons-material/DeleteOutlineRounded'
 import SendRoundedIcon from '@mui/icons-material/SendRounded'
-import UploadFileRoundedIcon from '@mui/icons-material/UploadFileRounded'
 
 import Header from '../components/Header'
 import FeedbackButtons from '../components/FeedbackButtons'
 import { api } from '../api/client'
 import { useAuth } from '../context/AuthContext'
-import { fileToBase64 } from '../utils/base64'
 
+/* ── modal styles ONLY ── */
+const STYLE_ID = 'chat-modal-styles'
+if (typeof document !== 'undefined' && !document.getElementById(STYLE_ID)) {
+  const s = document.createElement('style')
+  s.id = STYLE_ID
+  s.textContent = `
+    .chat-modal-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,.45);
+      backdrop-filter: blur(4px);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 2000; padding: 16px;
+      animation: chat-fade .18s ease;
+    }
+    .chat-modal {
+      width: min(420px, 92vw);
+      background: var(--color-background-primary);
+      border: 1px solid var(--color-border-tertiary);
+      border-radius: 18px;
+      padding: 28px;
+      animation: chat-rise .22s cubic-bezier(.22,.86,.44,1);
+    }
+    @keyframes chat-fade { from { opacity: 0 } to { opacity: 1 } }
+    @keyframes chat-rise { from { opacity: 0; transform: translateY(12px) } to { opacity: 1; transform: none } }
+
+    .chat-modal-actions {
+      display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px;
+    }
+
+    .chat-modal-cancel {
+      font-family: 'DM Sans', sans-serif;
+      font-size: 13px; font-weight: 500;
+      padding: 9px 18px;
+      border: 1px solid #CBD5E1;
+      border-radius: 9px;
+      background: transparent;
+      color: #64748B;
+      cursor: pointer;
+    }
+    .chat-modal-cancel:hover { background: rgba(0,0,0,.04); }
+
+    .chat-modal-confirm {
+      font-family: 'DM Sans', sans-serif;
+      font-size: 13px; font-weight: 500;
+      padding: 9px 18px;
+      border: none;
+      border-radius: 9px;
+      background: #DC2626;
+      color: #fff;
+      cursor: pointer;
+    }
+    .chat-modal-confirm:hover { background: #B91C1C; }
+  `
+  document.head.appendChild(s)
+}
+
+/* warning icon */
+const IconWarn = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#DC2626" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+    <line x1="12" y1="9" x2="12" y2="13"/>
+    <line x1="12" y1="17" x2="12.01" y2="17"/>
+  </svg>
+)
 
 export default function ChatPage() {
-  const { token, role } = useAuth()
+  const { token } = useAuth()
   const [messages, setMessages] = useState([])
   const [question, setQuestion] = useState('')
-  const [uploadStatus, setUploadStatus] = useState('')
   const [error, setError] = useState('')
 
   const [phase, setPhase] = useState('idle')
@@ -33,6 +93,7 @@ export default function ChatPage() {
   const [streamSources, setStreamSources] = useState([])
 
   const [historyLoaded, setHistoryLoaded] = useState(false)
+  const [showClearModal, setShowClearModal] = useState(false)
 
   const chatRef = useRef(null)
   const bottomRef = useRef(null)
@@ -74,9 +135,7 @@ export default function ChatPage() {
     const t = setTimeout(async () => {
       try {
         await api.saveConversation(token, messages)
-      } catch {
-        // non-blocking persistence failure
-      }
+      } catch {}
     }, 300)
 
     return () => clearTimeout(t)
@@ -100,9 +159,7 @@ export default function ChatPage() {
       try {
         const created = await api.createMessage(token, { role: 'assistant', content: text })
         message.id = created.id
-      } catch {
-        // feedback is optional, so skip if creation fails
-      }
+      } catch {}
       setMessages((prev) => [...prev, message])
     }
 
@@ -147,30 +204,6 @@ export default function ChatPage() {
     }
   }
 
-  const onUpload = async (e) => {
-    const files = Array.from(e.target.files || [])
-    if (!files.length) return
-    setError('')
-
-    for (const file of files) {
-      try {
-        setUploadStatus(`Processing ${file.name}...`)
-        const content_b64 = await fileToBase64(file)
-        const data = await api.uploadDocument(token, file.name, content_b64)
-
-        if (data.status === 'Duplicate') {
-          setUploadStatus(`Duplicate: ${file.name} (skipped)`)
-        } else {
-          setUploadStatus(`Indexed: ${file.name} (${data.indexed_chunks || 0} chunks)`)
-        }
-      } catch (err) {
-        setError(err.message)
-      }
-    }
-
-    setTimeout(() => setUploadStatus(''), 1200)
-  }
-
   const onInputKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
@@ -178,34 +211,18 @@ export default function ChatPage() {
     }
   }
 
-  const sidebarExtra = role === 'admin' ? (
-    <Stack spacing={1.2}>
-      <Typography variant="subtitle2">Upload documents</Typography>
-      <Button variant="outlined" component="label" startIcon={<UploadFileRoundedIcon />}>
-        Select files
-        <input hidden type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.doc,.docx" onChange={onUpload} />
-      </Button>
-      {uploadStatus ? <Typography variant="caption" sx={{ color: '#a8f3c2' }}>{uploadStatus}</Typography> : null}
-    </Stack>
-  ) : (
-    <Typography variant="caption" sx={{ opacity: 0.76 }}>
-      Employee mode: upload disabled.
-    </Typography>
-  )
-
   return (
     <Header
       title="Chat"
       layout="chat"
-      sidebarExtra={sidebarExtra}
       headerActions={
         <Button
           variant="outlined"
           color="error"
           size="small"
           startIcon={<DeleteOutlineRoundedIcon />}
-          onClick={clearConversation}
-          disabled={generating}
+          onClick={() => setShowClearModal(true)}
+          disabled={generating || messages.length === 0}
         >
           Delete conversation
         </Button>
@@ -216,12 +233,13 @@ export default function ChatPage() {
 
         <Box className="cg-chat-shell">
           <Box ref={chatRef} className="cg-chat-scroll">
+
           {messages.length === 0 && phase === 'idle' ? (
-            <Typography sx={{ opacity: 0.72 }}>Start a conversation.</Typography>
+            <Typography sx={{ opacity: 0.72 }}>Par quoi commençons-nous ?</Typography>
           ) : null}
 
           {messages.map((m, i) => (
-            <Box key={`${m.role}-${i}`} className={`cg-msg-wrap ${m.role === 'user' ? 'user' : 'assistant'} fade-in`}>
+            <Box key={m.id || `${m.role}-${i}`} className={`cg-msg-wrap ${m.role === 'user' ? 'user' : 'assistant'} fade-in`}>
               <Box className={`cg-bubble ${m.role === 'user' ? 'user' : 'assistant'}`}>
                 {m.role === 'assistant' ? (
                   <Box className="md-content">
@@ -240,19 +258,15 @@ export default function ChatPage() {
             </Box>
           ))}
 
-          {phase === 'requesting' ? (
+          {phase === 'requesting' && (
             <Box className="cg-msg-wrap assistant fade-in">
               <Box className="cg-bubble assistant">
-                <Box className="cg-dots" aria-label="thinking">
-                  <span />
-                  <span />
-                  <span />
-                </Box>
+                <Box className="cg-dots"><span /><span /><span /></Box>
               </Box>
             </Box>
-          ) : null}
+          )}
 
-          {phase === 'typing' ? (
+          {phase === 'typing' && (
             <Box className="cg-msg-wrap assistant fade-in">
               <Box className="cg-bubble assistant">
                 <Box className="md-content">
@@ -266,34 +280,75 @@ export default function ChatPage() {
                 ) : null}
               </Box>
             </Box>
-          ) : null}
+          )}
+
           <div ref={bottomRef} />
           </Box>
 
           <Box component="form" className="cg-composer" onSubmit={ask}>
-          <TextField
-            placeholder="Message RAG Assistant..."
-            multiline
-            minRows={1}
-            maxRows={8}
-            value={question}
-            onChange={(e) => setQuestion(e.target.value)}
-            onKeyDown={onInputKeyDown}
-            disabled={generating}
-            fullWidth
-          />
-          <Button
-            variant="contained"
-            type="submit"
-            disabled={generating || !question.trim()}
-            endIcon={<SendRoundedIcon />}
-            sx={{ minWidth: 120 }}
-          >
-            Send
-          </Button>
+            <TextField
+              placeholder="Poser votre question ici..."
+              multiline
+              minRows={1}
+              maxRows={8}
+              value={question}
+              onChange={(e) => setQuestion(e.target.value)}
+              onKeyDown={onInputKeyDown}
+              disabled={generating}
+              fullWidth
+            />
+            <Button
+              variant="contained"
+              type="submit"
+              disabled={generating || !question.trim()}
+              endIcon={<SendRoundedIcon />}
+              sx={{ minWidth: 120 }}
+            >
+              Send
+            </Button>
           </Box>
         </Box>
       </Box>
+
+      {/* ── confirm modal ── */}
+      {showClearModal && (
+        <div className="chat-modal-overlay" onClick={() => setShowClearModal(false)}>
+          <div className="chat-modal" onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
+              <div style={{
+                width: 38, height: 38, borderRadius: 10,
+                background: '#FEF2F2', border: '1px solid #FECACA',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <IconWarn />
+              </div>
+              <div>
+                <div style={{ fontSize: 17, fontWeight: 600, marginBottom: 8 }}>
+                  Delete conversation
+                </div>
+                <p style={{ fontSize: 14, margin: 0, opacity: 0.8 }}>
+                  This action is irreversible. All messages will be permanently deleted.
+                </p>
+              </div>
+            </div>
+
+            <div className="chat-modal-actions">
+              <button className="chat-modal-cancel" onClick={() => setShowClearModal(false)}>
+                Cancel
+              </button>
+              <button
+                className="chat-modal-confirm"
+                onClick={async () => {
+                  setShowClearModal(false)
+                  await clearConversation()
+                }}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </Header>
   )
 }

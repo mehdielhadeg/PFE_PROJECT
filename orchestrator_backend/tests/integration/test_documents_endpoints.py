@@ -47,14 +47,18 @@ def test_documents_list_integration(admin_client, monkeypatch):
 def test_documents_upload_integration(admin_client, monkeypatch):
     repo = _FakeRepo()
     monkeypatch.setattr('gateway.views._document_repo_or_error', lambda: (repo, None))
+    called = {}
+
+    def _fake_enqueue(filename, content_b64, uploaded_by):
+        called['filename'] = filename
+        called['content_b64'] = content_b64
+        called['uploaded_by'] = uploaded_by
+
+    monkeypatch.setattr('gateway.views._enqueue', _fake_enqueue)
 
     def _fake_post(url, json=None, timeout=None):
         if url.endswith('/documents/upload'):
             return _FakeResp({'success': True, 'status': 'Success'})
-        if url.endswith('/ingest'):
-            return _FakeResp({'chunks': [{'text': 'x', 'metadata': {'source': 'a.pdf'}}]})
-        if url.endswith('/index/upsert'):
-            return _FakeResp({'indexed_chunks': 1})
         return _FakeResp({})
 
     monkeypatch.setattr('gateway.views.requests.post', _fake_post)
@@ -64,5 +68,6 @@ def test_documents_upload_integration(admin_client, monkeypatch):
         {'filename': 'a.pdf', 'content_b64': 'ZmFrZQ=='},
         format='json',
     )
-    assert resp.status_code == 200
-    assert resp.data['status'] == 'Success'
+    assert resp.status_code == 202
+    assert resp.data['status'] == 'Processing'
+    assert called['filename'] == 'a.pdf'

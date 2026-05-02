@@ -71,14 +71,18 @@ def test_documents_signed_url(admin_client, monkeypatch):
 def test_documents_upload_success(admin_client, monkeypatch):
     repo = _FakeRepo()
     monkeypatch.setattr('gateway.views._document_repo_or_error', lambda: (repo, None))
+    captured = {}
+
+    def _fake_enqueue(filename, content_b64, uploaded_by):
+        captured['filename'] = filename
+        captured['content_b64'] = content_b64
+        captured['uploaded_by'] = uploaded_by
+
+    monkeypatch.setattr('gateway.views._enqueue', _fake_enqueue)
 
     def _fake_post(url, json=None, timeout=None):
         if url.endswith('/documents/upload'):
             return _FakeResp({'success': True, 'status': 'Success'})
-        if url.endswith('/ingest'):
-            return _FakeResp({'chunks': [{'text': 'x', 'metadata': {'source': 'a.pdf'}}]})
-        if url.endswith('/index/upsert'):
-            return _FakeResp({'indexed_chunks': 1})
         return _FakeResp({})
 
     monkeypatch.setattr('gateway.views.requests.post', _fake_post)
@@ -88,8 +92,11 @@ def test_documents_upload_success(admin_client, monkeypatch):
         {'filename': 'a.pdf', 'content_b64': 'ZmFrZQ=='},
         format='json',
     )
-    assert resp.status_code == 200
-    assert resp.data['status'] == 'Success'
+    assert resp.status_code == 202
+    assert resp.data['status'] == 'Processing'
+    assert captured['filename'] == 'a.pdf'
+    assert captured['content_b64'] == 'ZmFrZQ=='
+    assert captured['uploaded_by'] == 'admin_user'
 
 
 @pytest.mark.django_db
@@ -111,6 +118,7 @@ def test_documents_upload_duplicate(admin_client, monkeypatch):
     )
     assert resp.status_code == 200
     assert resp.data['status'] == 'Duplicate'
+    assert repo.docs[-1]['name'] == 'a.pdf'
 
 
 @pytest.mark.django_db

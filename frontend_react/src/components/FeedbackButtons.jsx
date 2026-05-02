@@ -41,7 +41,7 @@ export default function FeedbackButtons({ messageId }) {
       await api.sendFeedback(token, messageId, { is_positive: isPositive })
       setSubmitted(true)
     } catch (err) {
-      setError(err.message || 'Feedback failed')
+      setError(err.message || 'Feedback échoué')
     } finally {
       setLoading(false)
     }
@@ -59,7 +59,7 @@ export default function FeedbackButtons({ messageId }) {
         aria-label="Thumbs up"
       >
         <ThumbsUp size={16} />
-        Helpful
+        Utile
       </button>
       <button
         type="button"
@@ -71,10 +71,10 @@ export default function FeedbackButtons({ messageId }) {
         aria-label="Thumbs down"
       >
         <ThumbsDown size={16} />
-        Not helpful
+        Non utile
       </button>
       {error ? <span className="ml-2 text-red-300">{error}</span> : null}
-      {submitted ? <span className="ml-2 text-emerald-300">Thanks for your feedback.</span> : null}
+      {submitted ? <span className="ml-2 text-emerald-300">Merci pour votre feedback.</span> : null}
     </div>
   )
 }

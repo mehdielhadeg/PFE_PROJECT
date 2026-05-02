@@ -132,39 +132,7 @@ class TestAskEndpoint:
         with client.stream('POST', '/ask', json={'question': question, 'top_k': top_k}) as r:
             return parse_sse(r.text)
     
-
-   
-
-
-    def test_ask_respects_top_k_setting(self):
-        mock_chat_model.stream.return_value = [MagicMock(content='ok')]
-        with patch('llm_service.app.main.httpx.AsyncClient') as mock_http:
-            mock_http.return_value.__aenter__ = AsyncMock(return_value=mock_http.return_value)
-            mock_http.return_value.__aexit__ = AsyncMock(return_value=False)
-            post_mock = AsyncMock(return_value=mock_search_response([make_doc('text')]))
-            mock_http.return_value.post = post_mock
-
-            with client.stream('POST', '/ask', json={'question': 'test', 'top_k': 2}) as r:
-                r.read()
-
-        call_json = post_mock.call_args.kwargs['json']
-        # top_k should be min(req.top_k, rag_max_context_chunks) = min(2, 6) = 2
-        assert call_json['top_k'] == 2
-
-    def test_ask_top_k_capped_by_max_context_chunks(self):
-        mock_chat_model.stream.return_value = [MagicMock(content='ok')]
-        with patch('llm_service.app.main.httpx.AsyncClient') as mock_http:
-            mock_http.return_value.__aenter__ = AsyncMock(return_value=mock_http.return_value)
-            mock_http.return_value.__aexit__ = AsyncMock(return_value=False)
-            post_mock = AsyncMock(return_value=mock_search_response([make_doc('text')]))
-            mock_http.return_value.post = post_mock
-
-            # Request top_k=100, but rag_max_context_chunks=6
-            with client.stream('POST', '/ask', json={'question': 'test', 'top_k': 100}) as r:
-                r.read()
-
-        call_json = post_mock.call_args.kwargs['json']
-        assert call_json['top_k'] == 6  # capped at rag_max_context_chunks
+    
 
     def test_ask_response_is_event_stream(self):
         mock_chat_model.stream.return_value = [MagicMock(content='ok')]

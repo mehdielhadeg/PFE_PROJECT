@@ -59,12 +59,31 @@ From orchestrator_backend:
 - pip install -r requirements-dev.txt
 - pytest
 
-5) Why this is CI/CD ready
+4B) RabbitMQ Upload Flow Impact
+- `documents_upload` is now asynchronous:
+  - Expected response: HTTP 202 with `status=Processing`
+  - Queue publish is validated by mocking `_enqueue`
+  - Sync `/ingest` and `/index/upsert` assertions were removed from Django upload endpoint tests
+
+Updated test files:
+- `orchestrator_backend/gateway/tests/test_documents_api.py`
+- `orchestrator_backend/tests/integration/test_documents_endpoints.py`
+
+5) Recommended Commands
+From project root (`microservices`):
+- Run all Django unit + integration tests:
+  - `python -m pytest orchestrator_backend/gateway/tests orchestrator_backend/tests -v`
+- Run only document upload tests (after RabbitMQ refactor):
+  - `python -m pytest orchestrator_backend/gateway/tests/test_documents_api.py orchestrator_backend/tests/integration/test_documents_endpoints.py -v`
+- Run full repo tests (Django + services + other testpaths from `pytest.ini`):
+  - `python -m pytest`
+
+6) Why this is CI/CD ready
 - Tests use Django test database (no external dependencies).
 - Supabase and microservices are not required for these tests.
 - Deterministic outcomes suitable for pipelines.
 
-6) Next Test Phases (Recommended)
+7) Next Test Phases (Recommended)
 - Django integration tests for /api/users, /api/documents, /api/chat.
 - Service-level tests for ingestion/indexing/llm with mocks.
 - React unit tests (vitest) and E2E (Playwright).

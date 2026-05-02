@@ -1,6 +1,8 @@
+import json
 from datetime import datetime, timedelta
 from urllib.parse import quote
 
+import pika
 import requests
 from django.http import StreamingHttpResponse
 from django.conf import settings
@@ -83,6 +85,26 @@ def _document_repo_or_error() -> tuple[DocumentRepository | None, Response | Non
         table_name=settings.SUPABASE_DOCUMENTS_TABLE,
         bucket_name=settings.SUPABASE_BUCKET,
     ), None
+
+
+def _enqueue(filename: str, content_b64: str, uploaded_by: str) -> None:
+    connection = pika.BlockingConnection(pika.URLParameters(settings.RABBITMQ_URL))
+    channel = connection.channel()
+    channel.queue_declare(queue='upload_queue', durable=True)
+    payload = json.dumps(
+        {
+            'filename': filename,
+            'content_b64': content_b64,
+            'uploaded_by': uploaded_by,
+        }
+    )
+    channel.basic_publish(
+        exchange='',
+        routing_key='upload_queue',
+        body=payload,
+        properties=pika.BasicProperties(delivery_mode=2),
+    )
+    connection.close()
 
 
 class ChatMessageViewSet(viewsets.ViewSet):
@@ -357,38 +379,28 @@ def documents_upload(request):
 
     upload_data = upload_resp.json()
     if upload_data.get('status') == 'Duplicate':
+        try:
+            repo, error_response = _document_repo_or_error()
+            if error_response:
+                return error_response
+            repo.upsert_document(name=filename, uploaded_by=request.user.username)
+        except Exception as exc:
+            return _service_error('Document metadata save error', exc)
         return Response({'status': 'Duplicate', 'filename': filename, 'indexed_chunks': 0}, status=status.HTTP_200_OK)
 
     if not upload_data.get('success'):
         return Response(upload_data, status=status.HTTP_400_BAD_REQUEST)
 
     try:
-        ingest_resp = requests.post(
-            f"{settings.MICRO_INGESTION_URL}/ingest",
-            json={'filename': filename, 'content_b64': content_b64},
-            timeout=REQUEST_TIMEOUT,
-        )
-        ingest_resp.raise_for_status()
-        chunks = ingest_resp.json().get('chunks', [])
-
-        index_resp = requests.post(
-            f"{settings.MICRO_INDEXING_URL}/index/upsert",
-            json={'chunks': chunks},
-            timeout=REQUEST_TIMEOUT,
-        )
-        index_resp.raise_for_status()
-
         repo, error_response = _document_repo_or_error()
         if error_response:
             return error_response
         repo.upsert_document(name=filename, uploaded_by=request.user.username)
-    except requests.RequestException as exc:
-        return _service_error('Ingestion/Indexing error', exc)
+        _enqueue(filename, content_b64, request.user.username)
     except Exception as exc:
-        return _service_error('Document metadata save error', exc)
+        return _service_error('Queue enqueue or metadata save error', exc)
 
-    indexed_chunks = int(index_resp.json().get('indexed_chunks', 0))
-    return Response({'status': 'Success', 'filename': filename, 'indexed_chunks': indexed_chunks})
+    return Response({'status': 'Processing', 'filename': filename}, status=status.HTTP_202_ACCEPTED)
 
 
 @api_view(['DELETE'])
