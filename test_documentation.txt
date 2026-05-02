@@ -2,20 +2,23 @@ TEST DOCUMENTATION - Django Backend and CI
 Generated: 2026-05-02
 
 1) Test Scope
-- Focus today: Django orchestrator tests.
+- Focus today: Django orchestrator tests and FastAPI services tests.
 - Covered areas:
-  - serializers
-  - permissions
-  - authentication endpoints
-  - users CRUD
-  - documents endpoints
-  - conversations endpoints
-  - chat endpoint
-  - repository helpers
-  - user deletion signals
+  - Django serializers
+  - Django permissions
+  - Django authentication endpoints
+  - Django users CRUD
+  - Django documents endpoints
+  - Django conversations endpoints
+  - Django chat endpoint
+  - Django repository helpers
+  - Django user deletion signals
+  - ingestion service tests
+  - indexing service tests
+  - llm service tests
 
 2) Test Structure
-Primary unit and API-focused tests:
+Primary Django unit and API-focused tests:
 - orchestrator_backend/gateway/tests/test_serializers.py
 - orchestrator_backend/gateway/tests/test_permissions.py
 - orchestrator_backend/gateway/tests/test_auth.py
@@ -33,10 +36,22 @@ Integration-style Django tests:
 - orchestrator_backend/tests/integration/test_chat_endpoint.py
 - orchestrator_backend/tests/integration/test_documents_endpoints.py
 
+Services tests:
+- services/tests/ingestion/test_ingestion.py
+- services/tests/indexing/test_indexing.py
+- services/tests/llm/test_llm.py
+- services/tests/conftest.py
+- services/pytest.ini
+
 3) Test Settings
+Django tests:
 - pytest uses: `orchestrator_backend.settings_test`
-- The dedicated test settings force SQLite so tests never connect to the real Supabase/Postgres database.
-- This makes local runs and CI runs deterministic.
+- Dedicated test settings force SQLite so tests never connect to the real Supabase/Postgres database.
+
+Services tests:
+- pytest uses: `services/pytest.ini`
+- This isolates service tests from Django pytest settings defined at the project root.
+- External APIs are mocked inside the tests.
 
 4) RabbitMQ Upload Flow Impact
 - `documents_upload` is now asynchronous.
@@ -48,10 +63,12 @@ Files updated for this flow:
 - orchestrator_backend/gateway/tests/test_documents_api.py
 - orchestrator_backend/tests/integration/test_documents_endpoints.py
 
-5) Local Installation for Django Tests
+5) Local Installation
 From project root (`microservices`):
 - `pip install -r orchestrator_backend/requirements.txt`
 - `pip install -r orchestrator_backend/requirements-dev.txt`
+- `pip install -r services/requirements.txt`
+- `pip install pytest pytest-cov`
 
 6) Local Commands
 Run all Django tests:
@@ -60,8 +77,16 @@ Run all Django tests:
 Run Django tests with coverage:
 - `python -m pytest orchestrator_backend/gateway/tests orchestrator_backend/tests --cov=orchestrator_backend/gateway --cov-report=term-missing --cov-report=html --cov-report=xml -v`
 
-Run only the upload-related tests after RabbitMQ refactor:
+Run only the upload-related Django tests:
 - `python -m pytest orchestrator_backend/gateway/tests/test_documents_api.py orchestrator_backend/tests/integration/test_documents_endpoints.py -v`
+
+Run all services tests:
+- `cd services`
+- `python -m pytest tests -c pytest.ini -v`
+
+Run services tests with coverage:
+- `cd services`
+- `python -m pytest tests -c pytest.ini --cov=. --cov-report=term-missing --cov-report=html --cov-report=xml -v`
 
 7) GitHub Actions CI
 Workflow file:
@@ -71,14 +96,24 @@ Pipeline behavior:
 - Triggered on every push
 - Triggered on every pull request
 - Can also be launched manually from GitHub with `workflow_dispatch`
+
+Job 1: `django-tests`
 - Installs Python 3.12
 - Installs Django dependencies and test dependencies
 - Runs Django unit and integration tests with pytest
 - Generates coverage in terminal output, `coverage.xml`, and `htmlcov/`
 - Uploads the coverage files as GitHub Actions artifacts
 
+Job 2: `services-tests`
+- Installs Python 3.12
+- Installs FastAPI services dependencies
+- Runs `services/tests`
+- Uses `services/pytest.ini` to avoid interference from Django pytest settings
+- Generates services coverage in terminal output, `services/coverage.xml`, and `services/htmlcov/`
+- Uploads the coverage files as GitHub Actions artifacts
+
 8) Environment Variables in CI
-For this Django test pipeline, no real production secrets are required.
+For this pipeline, no real production secrets are required.
 The workflow injects safe dummy values for variables such as:
 - `SUPABASE_URL`
 - `SUPABASE_KEY`
@@ -88,30 +123,30 @@ The workflow injects safe dummy values for variables such as:
 - `RABBITMQ_URL`
 
 Why this is safe:
-- These tests mock external systems.
-- The Django test settings use SQLite, not your production database.
-- No live calls to Supabase, Pinecone, or RabbitMQ are required for this workflow.
+- External systems are mocked by the test suite.
+- Django test settings use SQLite, not the production database.
+- Services tests patch network-facing dependencies before importing the apps.
 
 9) What You Must Do in GitHub
 1. Push your code to GitHub.
 2. Open the repository on GitHub.
 3. Go to the `Actions` tab.
-4. GitHub will automatically detect `.github/workflows/ci.yml`.
-5. On the next push or pull request, the workflow will run automatically.
-6. Click the workflow run to see:
+4. On the next push or pull request, the workflow will run automatically.
+5. Open the workflow run to see:
    - install logs
-   - pytest results
+   - pytest results for both jobs
    - pass/fail status
    - uploaded coverage artifacts
 
 10) What You Do Not Need Yet
-- No GitHub Secrets are required for this first Django CI pipeline.
-- No database service container is required.
-- No RabbitMQ container is required for the Django tests currently covered.
+- No GitHub Secrets are required for this first CI pipeline.
+- No live database service is required.
+- No live RabbitMQ service is required.
+- No live Supabase, Pinecone, or Hugging Face credentials are required.
 
 11) Recommended Next Steps
-- Add a second CI job later for `services/tests` once you want the FastAPI services in the pipeline.
-- Add React Vitest job once frontend unit tests are in place.
-- Add branch protection so merges require the CI check to pass.
+- Add React Vitest tests and a third CI job for the frontend.
+- Add branch protection so merges require CI to pass.
+- Split coverage uploads to Codecov later if you want centralized reporting.
 
 End of document.

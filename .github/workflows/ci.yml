@@ -64,10 +64,67 @@ jobs:
             --cov-report=html:htmlcov \
             -v
 
-      - name: Upload coverage artifacts
+      - name: Upload Django coverage artifacts
         uses: actions/upload-artifact@v4
         with:
           name: django-coverage
           path: |
             coverage.xml
             htmlcov/
+
+  services-tests:
+    name: Services Tests
+    runs-on: ubuntu-latest
+
+    env:
+      PINECONE_API_KEY: ci-dummy
+      HF_TOKEN: ci-dummy
+      SUPABASE_URL: https://ci.example.com
+      SUPABASE_KEY: ci-dummy
+      SUPABASE_BUCKET: rag-docs
+      PINECONE_INDEX_NAME: ci-index
+      PINECONE_DIM: 768
+      PINECONE_METRIC: cosine
+      PINECONE_REGION: us-east-1
+      HF_EMBEDDING_MODEL: sentence-transformers/all-mpnet-base-v2
+      HF_CHAT_MODEL: mistralai/Mistral-7B-Instruct-v0.3
+      INGESTION_SERVICE_URL: http://localhost:8001
+      INDEXING_SERVICE_URL: http://localhost:8002
+      LLM_SERVICE_URL: http://localhost:8003
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: |
+            services/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r services/requirements.txt
+          pip install pytest pytest-cov
+
+      - name: Run services tests with coverage
+        working-directory: services
+        run: |
+          python -m pytest tests \
+            -c pytest.ini \
+            --cov=. \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml \
+            --cov-report=html:htmlcov \
+            -v
+
+      - name: Upload services coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: services-coverage
+          path: |
+            services/coverage.xml
+            services/htmlcov/
